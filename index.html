@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Corazón — Reproducible en navegador</title>
+  <style>
+    html,body{height:100%;margin:0;background:#000;color:#fff;font-family:Arial,Helvetica,sans-serif}
+    #container{display:flex;flex-direction:column;height:100%}
+    #canvas{flex:1;display:block;background:#000}
+    #controls{padding:10px;background:#0b0b0b;display:flex;gap:10px;align-items:center}
+    label{font-size:14px}
+    input[type=text]{padding:6px;border-radius:4px;border:1px solid #333;background:#111;color:#fff}
+    button{padding:8px 12px;border-radius:6px;border:0;background:#ffb6c1;color:#000;font-weight:700;cursor:pointer}
+    a.link{color:#ffb6c1}
+    footer{font-size:12px;padding:6px 10px;color:#bbb}
+  </style>
+</head>
+<body>
+  <div id="container">
+    <canvas id="canvas"></canvas>
+    <div id="controls">
+      <label>Escalas: <input id="scales" type="text" value="11-16" size="8"></label>
+      <label>Mensaje: <input id="message" type="text" value="¿QUIERES SER MI NOVIA?" size="30"></label>
+      <button id="redraw">Redibujar</button>
+      <button id="save">Guardar PNG</button>
+      <a id="openRaw" class="link" target="_blank" rel="noopener">Ver archivo raw</a>
+    </div>
+    <footer>Si el lienzo aparece borroso en pantallas HiDPI, usa el botón "Guardar PNG" para exportar imagen nítida.</footer>
+  </div>
+
+  <script>
+    // Parámetros y utilidades
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const scalesInput = document.getElementById('scales');
+    const messageInput = document.getElementById('message');
+    const redrawBtn = document.getElementById('redraw');
+    const saveBtn = document.getElementById('save');
+    const openRaw = document.getElementById('openRaw');
+
+    // Raw file URL (raw.githubusercontent)
+    const rawUrl = 'https://raw.githubusercontent.com/alexcruztorruco-dot/gofre-ps-quico-/main/index.html';
+    openRaw.href = rawUrl;
+    openRaw.textContent = 'Abrir HTML (raw)';
+
+    function resizeCanvas() {
+      const dpr = window.devicePixelRatio || 1;
+      const w = Math.max(300, window.innerWidth);
+      const h = Math.max(300, window.innerHeight - 70);
+      canvas.style.width = w + 'px';
+      canvas.style.height = h + 'px';
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    function parseScales(s) {
+      if (!s) return [11,12,13,14,15,16];
+      if (s.includes('-')){
+        const [a,b] = s.split('-').map(x=>parseInt(x.trim(),10));
+        if (!isNaN(a) && !isNaN(b) && a<=b){
+          const arr = [];
+          for(let i=a;i<=b;i++) arr.push(i);
+          return arr;
+        }
+      }
+      const single = parseInt(s,10);
+      if (!isNaN(single)) return [single];
+      return [11,12,13,14,15,16];
+    }
+
+    // Parametric heart (same formulas que el script Python)
+    function computeHeartPoints(scale, stepDeg=2){
+      const pts = [];
+      for(let deg=0; deg<360; deg+=stepDeg){
+        const angle = deg * Math.PI/180;
+        const x = 16 * Math.pow(Math.sin(angle), 3) * scale;
+        const y = (13 * Math.cos(angle) - 5 * Math.cos(2*angle) - 2 * Math.cos(3*angle) - Math.cos(4*angle)) * scale;
+        pts.push([x,y]);
+      }
+      return pts;
+    }
+
+    function draw() {
+      resizeCanvas();
+      // Clear
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      const cx = w/2;
+      const cy = h/2 - 10; // shift message lower
+
+      const scales = parseScales(scalesInput.value);
+
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+
+      // Draw each scaled heart
+      ctx.globalCompositeOperation = 'source-over';
+      for(let si=0; si<scales.length; si++){
+        const scale = scales[si];
+        const pts = computeHeartPoints(scale, 1);
+        ctx.beginPath();
+        for(let i=0;i<pts.length;i++){
+          const [x,y] = pts[i];
+          // Convert to canvas coordinates: scale the parametric coords to pixels
+          // The parametric coords are roughly in range [-16*scale,16*scale] horizontally
+          const px = cx + x * 8; // multiplier adjusts size
+          const py = cy - y * 8; // invert Y to canvas coordinates
+          if (i===0) ctx.moveTo(px,py);
+          else ctx.lineTo(px,py);
+        }
+        ctx.closePath();
+        ctx.strokeStyle = '#ffb6c1';
+        ctx.lineWidth = Math.max(1.2, 2 - si*0.1);
+        ctx.stroke();
+      }
+
+      // Draw message
+      const message = messageInput.value || '¿QUIERES SER MI NOVIA?';
+      ctx.fillStyle = '#fff';
+      const fontSize = Math.min(40, Math.max(18, Math.floor(canvas.clientHeight/20)));
+      ctx.font = `bold ${fontSize}px Arial, Helvetica, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(message, cx, cy + 60);
+    }
+
+    // Save PNG (export scaled image for crisp result)
+    function savePNG(){
+      // Create a temporary canvas at higher resolution
+      const outW = Math.max(600, canvas.clientWidth * 2);
+      const outH = Math.max(400, (canvas.clientHeight + 80) * 2);
+      const tmp = document.createElement('canvas');
+      tmp.width = outW;
+      tmp.height = outH;
+      const g = tmp.getContext('2d');
+      // Fill background
+      g.fillStyle = '#000';
+      g.fillRect(0,0,outW,outH);
+
+      // Draw hearts scaled to tmp canvas
+      const cx = outW/2;
+      const cy = outH/2 - 20;
+      const scales = parseScales(scalesInput.value);
+      for(let si=0; si<scales.length; si++){
+        const scale = scales[si];
+        const pts = computeHeartPoints(scale, 1);
+        g.beginPath();
+        for(let i=0;i<pts.length;i++){
+          const [x,y] = pts[i];
+          const px = cx + x * 16; // larger multiplier for high-res
+          const py = cy - y * 16;
+          if (i===0) g.moveTo(px,py);
+          else g.lineTo(px,py);
+        }
+        g.closePath();
+        g.strokeStyle = '#ffb6c1';
+        g.lineWidth = Math.max(3, 4 - si*0.2);
+        g.stroke();
+      }
+
+      // Message
+      const message = messageInput.value || '¿QUIERES SER MI NOVIA?';
+      g.fillStyle = '#fff';
+      const fontSize = Math.min(120, Math.max(40, Math.floor(outH/12)));
+      g.font = `bold ${fontSize}px Arial, Helvetica, sans-serif`;
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.fillText(message, cx, cy + 120);
+
+      // Trigger download
+      const url = tmp.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'heart.png';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+
+    window.addEventListener('resize', () => {
+      draw();
+    });
+
+    redrawBtn.addEventListener('click', () => draw());
+    saveBtn.addEventListener('click', () => savePNG());
+
+    // Initial draw
+    draw();
+  </script>
+</body>
+</html>
